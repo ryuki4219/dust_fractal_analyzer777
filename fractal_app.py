@@ -47,7 +47,7 @@ def judge(occ, uni, mps, frac):
     score += uni > 0.05         # 均一度高いほど +1
     score += mps < 10           # 粒径小さいほど +1
     score += (frac and frac > 1.5)
-    levels = ["汚い", "やや汚い", "普通", "綺麗"]     # 0〜3
+    levels = ["汚い", "やや汚い", "やや綺麗", "綺麗"]     # 0〜3
     return levels[min(score,3)], score
 
 # ----------  サイドバー  ----------

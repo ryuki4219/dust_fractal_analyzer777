@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-fractal_app_v3_fix_polarity2.py
-  - あらゆる 2 値化手順後に “粒子＝白／背景＝黒” を再確認
-  - サイドバー日本語を自然に修正
-    * 大津法（自動） / 適応的（ガウシアン）/ 手動しきい値
+fractal_app_v3_fix_polarity3.py
+  - 自動2値化は大津法ではなく適応的2値化（ガウシアン）に変更
+  - 粒子＝白、背景＝黒を厳密に保証
+  - サイドバーの日本語も自然に修正済み
 """
 import streamlit as st, cv2, numpy as np, pandas as pd
 import matplotlib.pyplot as plt, plotly.express as px
@@ -16,7 +16,7 @@ with st.sidebar:
     st.header("⚙ 解析オプション")
     bin_method = st.radio(
         "2値化手法を選択",
-        ["大津法（自動）", "適応的（ガウシアン）", "手動しきい値"],
+        ["自動（適応的ガウシアン）", "適応的（ガウシアン）", "手動しきい値"],
         index=0
     )
     manual_th = st.slider("手動しきい値 (0‑255)", 0, 255, 128, 1) \
@@ -53,16 +53,16 @@ def analyze(file_bytes, max_side, bin_method, manual_th):
     gray = cv2.cvtColor(col, cv2.COLOR_BGR2GRAY)
 
     # ----- 二値化 -----
-    if bin_method == "大津法（自動）":
-        th, _ = cv2.threshold(gray, 0, 255, cv2.THRESH_OTSU)
-        bin_img = cv2.threshold(gray, th, 255, cv2.THRESH_BINARY)[1]
+    if bin_method == "自動（適応的ガウシアン）":
+        bin_img = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                        cv2.THRESH_BINARY, 21, 2)
     elif bin_method == "適応的（ガウシアン）":
         bin_img = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                         cv2.THRESH_BINARY, 21, 2)
     else:  # 手動
         bin_img = cv2.threshold(gray, manual_th, 255, cv2.THRESH_BINARY)[1]
 
-    bin_img = enforce_white_particles(bin_img)  # ここで必ず粒子=白
+    bin_img = enforce_white_particles(bin_img)  # ここで必ず粒子=白、背景=黒
 
     # ----- 指標計算 -----
     occupancy = np.count_nonzero(bin_img == 255) / bin_img.size * 100

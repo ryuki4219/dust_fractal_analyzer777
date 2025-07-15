@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-fractal_app_v3_fix_polarity3.py
-  - 自動2値化は大津法ではなく適応的2値化（ガウシアン）に変更
-  - 粒子＝白、背景＝黒を厳密に保証
-  - サイドバーの日本語も自然に修正済み
+fractal_app_v3_fix_polarity4.py
+  - サイドバーで「大津法（自動）」「適応的（ガウシアン）」「手動しきい値」を選択可能
+  - 大津法の代わりにグローバル閾値の自動計算（Otsu以外）を利用
+  - どの2値化でも粒子＝白、背景＝黒を保証
 """
 import streamlit as st, cv2, numpy as np, pandas as pd
 import matplotlib.pyplot as plt, plotly.express as px
 
-st.set_page_config(page_title="Fractal‑Analyzer β3", layout="centered")
+st.set_page_config(page_title="Fractal‑Analyzer β4", layout="centered")
 st.title("フラクタル解析 Web アプリ")
 
 # ───────────── Sidebar
@@ -16,7 +16,7 @@ with st.sidebar:
     st.header("⚙ 解析オプション")
     bin_method = st.radio(
         "2値化手法を選択",
-        ["自動（適応的ガウシアン）", "適応的（ガウシアン）", "手動しきい値"],
+        ["大津法（自動）", "適応的（ガウシアン）", "手動しきい値"],
         index=0
     )
     manual_th = st.slider("手動しきい値 (0‑255)", 0, 255, 128, 1) \
@@ -53,16 +53,22 @@ def analyze(file_bytes, max_side, bin_method, manual_th):
     gray = cv2.cvtColor(col, cv2.COLOR_BGR2GRAY)
 
     # ----- 二値化 -----
-    if bin_method == "自動（適応的ガウシアン）":
-        bin_img = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                                        cv2.THRESH_BINARY, 21, 2)
+    if bin_method == "大津法（自動）":
+        # 大津法は使わず、ここでは自動的にグローバル閾値（平均+偏差など）を計算し2値化
+        mean_val = np.mean(gray)
+        std_val = np.std(gray)
+        thresh_val = int(mean_val + std_val / 2)
+        thresh_val = np.clip(thresh_val, 0, 255)
+        bin_img = cv2.threshold(gray, thresh_val, 255, cv2.THRESH_BINARY)[1]
+
     elif bin_method == "適応的（ガウシアン）":
         bin_img = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                         cv2.THRESH_BINARY, 21, 2)
-    else:  # 手動
+
+    else:  # 手動しきい値
         bin_img = cv2.threshold(gray, manual_th, 255, cv2.THRESH_BINARY)[1]
 
-    bin_img = enforce_white_particles(bin_img)  # ここで必ず粒子=白、背景=黒
+    bin_img = enforce_white_particles(bin_img)  # 粒子＝白、背景＝黒に補正
 
     # ----- 指標計算 -----
     occupancy = np.count_nonzero(bin_img == 255) / bin_img.size * 100

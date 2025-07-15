@@ -1,10 +1,13 @@
 # --- Web アプリ本体 ---
-streamlit==1.46.1          # 新しすぎても旧しすぎてもない安定版
+streamlit==1.46.1
 
 # --- 画像処理 ---
 opencv-python-headless==4.7.0.72
-numpy==1.24.4               # Python 3.11 と相性良し
+numpy==1.24.4
 
 # --- グラフ描画 ---
-plotly>=5.22                # 追加：インタラクティブ散布図用
-matplotlib                  # （旧コード互換。不要なら削除可）
+plotly>=5.22
+matplotlib                # ←残すならそのまま
+
+# ★ NEW ★ 回帰線計算用
+statsmodels>=0.14

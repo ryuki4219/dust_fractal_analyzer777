@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-fractal_app_v3_fix_polarity.py
-  - 手動しきい値でも粒子=白を保証
-  - 指標テーブルに説明と良好方向を追加
+fractal_app_v3_fix_polarity2.py
+  - あらゆる 2 値化手順後に “粒子＝白／背景＝黒” を再確認
+  - サイドバー日本語を自然に修正
+    * 大津法（自動） / 適応的（ガウシアン）/ 手動しきい値
 """
 import streamlit as st, cv2, numpy as np, pandas as pd
 import matplotlib.pyplot as plt, plotly.express as px
@@ -14,13 +15,13 @@ st.title("フラクタル解析 Web アプリ")
 with st.sidebar:
     st.header("⚙ 解析オプション")
     bin_method = st.radio(
-        "2値化方式",
-        ["大津(自動)", "適応的(ADAPTIVE)", "手動スライダー"],
+        "2値化手法を選択",
+        ["大津法（自動）", "適応的（ガウシアン）", "手動しきい値"],
         index=0
     )
     manual_th = st.slider("手動しきい値 (0‑255)", 0, 255, 128, 1) \
-        if bin_method == "手動スライダー" else None
-    max_side = st.slider("リサイズ上限(px)", 256, 1024, 800, 64)
+        if bin_method == "手動しきい値" else None
+    max_side = st.slider("リサイズ上限（px）", 256, 1024, 800, 64)
 
 # ───────────── Utils
 @st.cache_data(show_spinner=False)
@@ -40,50 +41,49 @@ def eval_grade(avg_score):
             "綺麗"        if avg_score < 75 else
             "とても綺麗")
 
-def to_white_particles(gray, thresh, inv=False):
-    """与えられた閾値で 2 値化。反転も試し、粒子(少数)が白になる方を返す"""
-    flag = cv2.THRESH_BINARY_INV if inv else cv2.THRESH_BINARY
-    _, b = cv2.threshold(gray, thresh, 255, flag)
-    white = np.count_nonzero(b == 255)
-    return b if white <= b.size/2 else cv2.bitwise_not(b)  # 常に粒子=白へ再調整
+def enforce_white_particles(bw_img):
+    """粒子(対象)を白、背景を黒 に強制"""
+    white_pix = np.count_nonzero(bw_img == 255)
+    return bw_img if white_pix <= bw_img.size / 2 else cv2.bitwise_not(bw_img)
 
 # ───────────── Main Analyzer
 @st.cache_data(show_spinner=True)
 def analyze(file_bytes, max_side, bin_method, manual_th):
-    col = resize_keep(cv2.imdecode(np.frombuffer(file_bytes,np.uint8), cv2.IMREAD_COLOR), max_side)
-    gray= cv2.cvtColor(col, cv2.COLOR_BGR2GRAY)
+    col = resize_keep(cv2.imdecode(np.frombuffer(file_bytes, np.uint8), cv2.IMREAD_COLOR), max_side)
+    gray = cv2.cvtColor(col, cv2.COLOR_BGR2GRAY)
 
     # ----- 二値化 -----
-    if bin_method == "大津(自動)":
-        th,_ = cv2.threshold(gray, 0, 255, cv2.THRESH_OTSU)
-        bin_img = to_white_particles(gray, th)
-    elif bin_method == "適応的(ADAPTIVE)":
-        b = cv2.adaptiveThreshold(gray,255,cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                                  cv2.THRESH_BINARY,21,2)
-        # 適応的の場合も粒子割合で正極性を確保
-        bin_img = b if np.count_nonzero(b==255)<=b.size/2 else cv2.bitwise_not(b)
+    if bin_method == "大津法（自動）":
+        th, _ = cv2.threshold(gray, 0, 255, cv2.THRESH_OTSU)
+        bin_img = cv2.threshold(gray, th, 255, cv2.THRESH_BINARY)[1]
+    elif bin_method == "適応的（ガウシアン）":
+        bin_img = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                        cv2.THRESH_BINARY, 21, 2)
     else:  # 手動
-        bin_img = to_white_particles(gray, manual_th)
+        bin_img = cv2.threshold(gray, manual_th, 255, cv2.THRESH_BINARY)[1]
+
+    bin_img = enforce_white_particles(bin_img)  # ここで必ず粒子=白
 
     # ----- 指標計算 -----
-    occupancy = np.count_nonzero(bin_img==255)/bin_img.size*100
-    hist = cv2.calcHist([gray],[0],None,[256],[0,256]).ravel(); hist /= hist.sum()
-    hist_uniform = 1/(hist.std()+1e-9)
-    cnt,_ = cv2.findContours(bin_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    areas = np.array([cv2.contourArea(c) for c in cnt if cv2.contourArea(c)>0])
+    occupancy = np.count_nonzero(bin_img == 255) / bin_img.size * 100
+    hist = cv2.calcHist([gray], [0], None, [256], [0, 256]).ravel()
+    hist /= hist.sum()
+    hist_uniform = 1 / (hist.std() + 1e-9)
+
+    cnt, _ = cv2.findContours(bin_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    areas = np.array([cv2.contourArea(c) for c in cnt if cv2.contourArea(c) > 0])
     mean_particle = np.sqrt(areas.mean()) if areas.size else 0
 
-    max_sz = max(2, min(bin_img.shape)//2)
-    sizes  = np.unique(np.logspace(1, np.log2(max_sz), num=10, base=2, dtype=int))
-    counts = [box_count(bin_img,s) for s in sizes]
-    fd     = -np.polyfit(np.log(sizes), np.log(counts), 1)[0]
+    max_sz = max(2, min(bin_img.shape) // 2)
+    sizes = np.unique(np.logspace(1, np.log2(max_sz), num=10, base=2, dtype=int))
+    counts = [box_count(bin_img, s) for s in sizes]
+    fd = -np.polyfit(np.log(sizes), np.log(counts), 1)[0]
 
-    # スコア換算
     scores = {
-        "Occupancy%":      100 - occupancy,           # 少ないほど高得点
-        "HistUniform":     np.clip(hist_uniform*10,0,100),  # 大きいほど高得点
-        "MeanParticle":    np.clip(mean_particle,0,100),    # 大きいほど高得点
-        "FractalDim":      np.clip((2.0-fd)*100,0,100)      # 1.0→100, 2.0→0
+        "Occupancy%":   100 - occupancy,                        # 少ないほど高得点
+        "HistUniform":  np.clip(hist_uniform * 10, 0, 100),
+        "MeanParticle": np.clip(mean_particle, 0, 100),
+        "FractalDim":   np.clip((2.0 - fd) * 100, 0, 100)
     }
     grade = eval_grade(np.mean(list(scores.values())))
 
@@ -99,7 +99,7 @@ def analyze(file_bytes, max_side, bin_method, manual_th):
         "MeanParticle(px)":   "粒子の平均径（px）",
         "FractalDim":         "フラクタル次元（表面粗さ）"
     }
-    better = {  # 良好方向
+    better = {
         "Occupancy%(粒子率)": "↓ 少ないほど良",
         "HistUniform":        "↑ 大きいほど良",
         "MeanParticle(px)":   "↑ 大きいほど良",
@@ -108,27 +108,31 @@ def analyze(file_bytes, max_side, bin_method, manual_th):
     return col, bin_img, sizes, counts, scores, raw_vals, desc, better, grade
 
 # ───────────── UI
-u = st.file_uploader("画像を選択 (png/jpg)", ["png","jpg","jpeg","bmp"])
+u = st.file_uploader("画像を選択 (png/jpg)", ["png", "jpg", "jpeg", "bmp"])
 if u:
     col, bin_img, sizes, counts, scores, raw, desc, better, grade = \
         analyze(u.read(), max_side, bin_method, manual_th)
 
     c1, c2 = st.columns(2)
-    with c1: st.image(cv2.cvtColor(col, cv2.COLOR_BGR2RGB), caption="元画像", use_column_width=True)
-    with c2: st.image(bin_img, caption="2値化画像 (粒子=白)", clamp=True, use_column_width=True)
+    with c1:
+        st.image(cv2.cvtColor(col, cv2.COLOR_BGR2RGB), caption="元画像", use_column_width=True)
+    with c2:
+        st.image(bin_img, caption="2値化画像 (粒子=白)", clamp=True, use_column_width=True)
 
     g1, g2 = st.columns(2)
     radar_df = pd.DataFrame({"Metric": list(scores), "Score": list(scores.values())})
     fig_r = px.line_polar(radar_df, r="Score", theta="Metric", line_close=True,
-                          range_r=[0,100], height=320)
+                          range_r=[0, 100], height=320)
     fig_r.update_traces(fill='toself')
-    with g1: st.plotly_chart(fig_r, use_container_width=True)
+    with g1:
+        st.plotly_chart(fig_r, use_container_width=True)
 
-    fig_fd, ax = plt.subplots(figsize=(3,3))
+    fig_fd, ax = plt.subplots(figsize=(3, 3))
     ax.plot(np.log(sizes), np.log(counts), "o-", color="tab:olive")
     ax.set_xlabel("log(Box Size)"); ax.set_ylabel("log(Count)")
     ax.set_title(f"Fractal Dimension: {raw['FractalDim']}", fontsize=9)
-    with g2: st.pyplot(fig_fd, use_container_width=True)
+    with g2:
+        st.pyplot(fig_fd, use_container_width=True)
 
     st.subheader("指標の実測値 & 説明")
     tbl = pd.DataFrame({
